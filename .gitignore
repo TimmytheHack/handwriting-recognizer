@@ -1,0 +1,7 @@
+# .gitignore
+# ──────────
+# Ignore everything in data/ …
+data/*
+
+# …except the README that explains the folder
+!data/README.md
