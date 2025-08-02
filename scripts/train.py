@@ -16,19 +16,20 @@ from src.data_utils import get_train_val_datasets, BASE_TRANSFORM
 from src.models import LeNet5
 
 ROOT = Path("data")
-NUM_EPOCHS = 10          # ❶ run for ten passes
+NUM_EPOCHS = 10
 
 
 def accuracy(logits, labels):
     return (logits.argmax(1) == labels).float().mean()
 
 def main():
-    train_ds, val_ds = get_train_val_datasets(ROOT, use_aug=False)
+    train_ds, val_ds = get_train_val_datasets(ROOT, use_aug=True)
     train_dl = DataLoader(train_ds, batch_size=128, shuffle=True)
     val_dl   = DataLoader(val_ds,   batch_size=256)
 
     model = LeNet5()
     opt   = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=5, gamma=0.1)
 
     for epoch in range(1, NUM_EPOCHS + 1):
         model.train()
@@ -51,6 +52,8 @@ def main():
                 correct += (logits.argmax(1) == y).sum().item()
                 total   += y.size(0)
         val_acc = correct / total
+
+        scheduler.step()
 
         print(f"Epoch {epoch:02}/{NUM_EPOCHS}  "
             f"loss: {avg_loss:.4f}  "
