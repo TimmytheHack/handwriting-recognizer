@@ -19,9 +19,9 @@ class LeNet5(nn.Module):
         self.conv1 = nn.Conv2d(1, 6, kernel_size=5)   # 28→24
         self.conv2 = nn.Conv2d(6, 16, kernel_size=5)  # 12→8
         # Classifier
-        self.fc1   = nn.Linear(16 * 4 * 4, 120)
-        self.fc2   = nn.Linear(120, 84)
-        self.fc3   = nn.Linear(84, 10)
+        self.fc1   = nn.Linear(16 * 4 * 4, 256)
+        self.fc2   = nn.Linear(256, 128)
+        self.fc3   = nn.Linear(128, 10)
 
     def forward(self, x):
         # (N,1,28,28) → logits (N,10)
