@@ -9,7 +9,7 @@ from src.data_utils import BASE_TRANSFORM
 from src.models import LeNet5   # or keep a single model import
 
 ROOT = Path("data")
-ckpt = torch.load("models/lenet_mnist.pt", map_location="cpu")
+ckpt = torch.load("models/lenet_mnist_v1.pt", map_location="cpu")
 
 model = LeNet5()
 model.load_state_dict(ckpt)

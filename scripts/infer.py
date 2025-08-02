@@ -28,7 +28,7 @@ img = prep(Image.open(args.img).convert("RGB")).unsqueeze(0)   # shape (1,1,28,2
 
 # --- Load checkpoint & predict -------------------------------------
 model = LeNet5()
-model.load_state_dict(torch.load("models/lenet_mnist.pt", map_location="cpu"))
+model.load_state_dict(torch.load("models/lenet_mnist_v1.pt", map_location="cpu"))
 model.eval()
 
 with torch.no_grad():

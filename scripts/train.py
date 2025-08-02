@@ -65,8 +65,8 @@ def main():
         
         if val_acc > best_acc:
             best_acc = val_acc
-            torch.save(model.state_dict(), "models/lenet_mnist.pt")
-            print(f"  ✔ saved new best model ({best_acc:.3%})")
+            torch.save(model.state_dict(), "models/lenet_mnist_v1.pt")
+            print(f"    saved new best model ({best_acc:.3%})")
 
 if __name__ == "__main__":
     main()

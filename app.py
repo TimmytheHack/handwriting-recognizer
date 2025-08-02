@@ -44,7 +44,7 @@ canvas = st_canvas(
 @st.cache_resource(show_spinner=False)
 def load_model():
     net = LeNet5()
-    net.load_state_dict(torch.load("models/lenet_mnist.pt", map_location="cpu"))
+    net.load_state_dict(torch.load("models/lenet_mnist_v1.pt", map_location="cpu"))
     net.eval()
     return net
 

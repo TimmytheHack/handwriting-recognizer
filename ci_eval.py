@@ -1,5 +1,5 @@
 """
-ci_eval.py  – run test-set evaluation and exit non-zero if accuracy < 99 %
+ci_eval.py  - run test-set evaluation and exit non-zero if accuracy < 99 %
 """
 
 import re, subprocess, sys, pathlib
