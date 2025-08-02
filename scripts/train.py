@@ -15,8 +15,11 @@ from torchvision.datasets import MNIST
 from src.data_utils import get_train_val_datasets, BASE_TRANSFORM
 from src.models import LeNet5
 
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
+
 ROOT = Path("data")
-NUM_EPOCHS = 10
+NUM_EPOCHS = 20
 
 
 def accuracy(logits, labels):
@@ -29,7 +32,8 @@ def main():
 
     model = LeNet5()
     opt   = torch.optim.Adam(model.parameters(), lr=1e-3)
-    scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=5, gamma=0.1)
+    scheduler = CosineAnnealingLR(opt, T_max=NUM_EPOCHS, eta_min=1e-5)
+    best_acc = 0.0
 
     for epoch in range(1, NUM_EPOCHS + 1):
         model.train()
@@ -43,7 +47,7 @@ def main():
             running_loss += loss.item() * x.size(0)
 
         avg_loss = running_loss / len(train_ds)
-
+        
         model.eval()
         correct = total = 0
         with torch.no_grad():
@@ -58,6 +62,11 @@ def main():
         print(f"Epoch {epoch:02}/{NUM_EPOCHS}  "
             f"loss: {avg_loss:.4f}  "
             f"val_acc: {val_acc:.3%}")
+        
+        if val_acc > best_acc:
+            best_acc = val_acc
+            torch.save(model.state_dict(), "models/lenet_mnist.pt")
+            print(f"  ✔ saved new best model ({best_acc:.3%})")
 
 if __name__ == "__main__":
     main()
