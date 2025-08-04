@@ -1,87 +1,139 @@
 #!/usr/bin/env python
-# app.py – Streamlit digit recogniser (fixed black background, no colour picker)
+# app.py – Streamlit handwriting recogniser (digits OR letters)
 
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 import torch, torchvision.transforms as T
 import numpy as np
-from PIL import Image, ImageFilter, ImageChops
+from PIL import Image, ImageFilter
 import pathlib, sys
 
-# make local package importable
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[0] / "src"))
-from models import LeNet5
 from data_utils import MEAN, STD
 
-# -------------------------- Streamlit page ----------------------------------
-st.set_page_config(page_title="MNIST Digit Recogniser", layout="centered")
-
-# sidebar – only pen width and clear button now
-st.sidebar.header("Canvas options")
+# --------------------------------------------------------------------- sidebar
+st.set_page_config(page_title="Handwriting Recognizer", layout="centered")
+st.sidebar.header("Canvas")
 stroke_width = st.sidebar.slider("Pen width", 1, 25, 12)
-clear_button = st.sidebar.button("Clear canvas")
+mode = st.sidebar.radio("Model", ["Digits (MNIST)", "Letters + Digits (EMNIST-bal)"])
 
-# force a fresh canvas on clear
-if "canvas_key" not in st.session_state:
-    st.session_state.canvas_key = 0
-if clear_button:
-    st.session_state.canvas_key += 1
+# allow clearing the canvas
+if st.sidebar.button("Clear"):
+    st.session_state.key = st.session_state.get("key", 0) + 1
     st.rerun()
 
-# ---------------------------- main canvas -----------------------------------
-st.title("🖌️ Draw a digit (0 – 9)")
+# ------------------------------------------------------------------ main title
+st.title("🖌️ Draw a character")
+
 canvas = st_canvas(
-    fill_color="rgba(255,255,255,1)",          # white ink
+    fill_color="rgba(255,255,255,1)",
     stroke_width=stroke_width,
     stroke_color="#FFFFFF",
-    background_color="#000000",                # fixed black background
+    background_color="#000000",
     height=280, width=280,
     drawing_mode="freedraw",
-    key=f"canvas{st.session_state.canvas_key}",
+    key=st.session_state.get("key", 0),
 )
 
-# --------------------------- model & transform ------------------------------
+# ----------------------------------------------------------- model + transform
 @st.cache_resource(show_spinner=False)
-def load_model():
-    net = LeNet5()
-    net.load_state_dict(torch.load("models/lenet_mnist_v1.pt", map_location="cpu"))
-    net.eval()
-    return net
+def load_model(which: str):
+    if which == "Digits (MNIST)":
+        from models import LeNet5
+        net = LeNet5()
+        ckpt = "models/lenet_mnist_v1.pt"
+        classes = [str(i) for i in range(10)]
 
-model = load_model()
+    else:  # EMNIST-balanced
+        from torchvision.models import resnet18
+        import torch.nn as nn
+
+        net = resnet18(num_classes=47, weights=None)
+        net.conv1 = nn.Conv2d(1, 64, 3, 1, 1, bias=False)
+        net.maxpool = nn.Identity()
+        ckpt = "models/resnet18_emnist_balanced.pt"
+
+        # --- fixed 47-label order used during training --------------------
+        classes = [
+            "0","1","2","3","4","5","6","7","8","9",
+            "A","B","C","D","E","F","G","H","I","J",
+            "K","L","M","N","O","P","Q","R","S","T",
+            "U","V","W","X","Y","Z",
+            "a","b","d","e","f","g","h","n","q","r","t"
+        ]
+        # index 0-46 now match the trained network’s logits exactly
+
+    net.load_state_dict(torch.load(ckpt, map_location="cpu"))
+    net.eval()
+    return net, classes
+
+
+model, class_names = load_model(mode)
+
 to_tensor = T.Compose([
     T.Resize((28, 28)),
     T.ToTensor(),
     T.Normalize((MEAN,), (STD,)),
 ])
 
-# ------------------------------- inference ----------------------------------
+# ---------- better crop → 28×28 tensor -------------------------------------
+def preprocess(img: Image.Image) -> torch.Tensor | None:
+    """
+    1. Binarise -> bbox  2. Pad 12px margin  3. Erode 3×3  4. Resize+norm
+    """
+    # 1) binarise & tight crop
+    bw = np.array(img) > 80               # stricter threshold
+    if not bw.any():
+        return None
+    ys, xs = np.where(bw)
+    x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
+    glyph = img.crop((x0, y0, x1 + 1, y1 + 1))
+
+    # 2) pad to centred square with +12px border
+    w, h = glyph.size                     # PIL size = (w, h)
+    side = max(w, h) + 12                 # generous margin
+    square = Image.new("L", (side, side), 0)
+    square.paste(glyph,
+                 ((side - w) // 2,        # x-offset
+                  (side - h) // 2))       # y-offset
+
+    # 3) thin thick strokes (1-pixel each side)
+    import cv2
+    sq_np = np.array(square)
+    sq_np = cv2.erode(sq_np,
+                  kernel=np.ones((3, 3), np.uint8),
+                  iterations=1)
+    square = Image.fromarray(sq_np)
+    # 4) resize → tensor → normalise
+    tensor = to_tensor(square).unsqueeze(0)   # (1, 1, 28, 28)
+    return tensor
+
+# ---------- inference block -------------------------------------------------
 if canvas.image_data is not None and canvas.image_data.sum() > 0:
-    # grab RGB, discard alpha
-    img_rgb = Image.fromarray(canvas.image_data.astype("uint8")[:, :, :3])
+    img = Image.fromarray(canvas.image_data.astype("uint8")[:, :, :3]).convert("L")
+    tensor = preprocess(img)
 
-    # build mask: anything brighter than 30 → stroke
-    gray = img_rgb.convert("L")
-    mask = gray.point(lambda p: 255 if p > 30 else 0)
-
-    # bail out if nothing drawn
-    if np.max(mask) == 0:
+    if tensor is None:                       # nothing drawn
         st.info("Draw something to get a prediction!")
         st.stop()
 
-    # optional: thicken strokes a tiny bit so very thin lines survive
-    mask = mask.filter(ImageFilter.MaxFilter(3))
+    # ── preview the 28×28 that the net sees ────────────────────────────────
+    img_np = (tensor.squeeze()              # (28,28) tensor
+                     .mul(STD)              # de-normalise
+                     .add(MEAN)
+                     .clamp(0, 1)
+                     .cpu()
+                     .numpy())              # → NumPy
+    st.image(img_np, width=140)
 
-    ink = Image.new("L", img_rgb.size, 0)
-    ink.paste(255, mask=mask)
-
-    tensor = to_tensor(ink).unsqueeze(0)          # (1,1,28,28)
     with torch.no_grad():
-        probs = torch.softmax(model(tensor), dim=1).squeeze()
-        pred  = int(probs.argmax())
-        conf  = float(probs[pred])
+        prob = torch.softmax(model(tensor), dim=1).squeeze()
 
-    st.markdown(f"### Prediction : **{pred}**")
-    st.progress(value=int(conf * 100), text=f"{conf:.1%} confidence")
+    topk = prob.topk(3)
+    st.markdown(
+        f"### **Top prediction → {class_names[topk.indices[0]]}** "
+        f"({topk.values[0]:.1%})"
+    )
+    st.write({class_names[i]: f"{p:.1%}" for p, i in zip(topk.values, topk.indices)})
 else:
     st.info("Draw something to get a prediction!")
