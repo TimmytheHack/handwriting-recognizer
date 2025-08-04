@@ -1,7 +1,8 @@
 name: CI-smoke
+
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
 
 jobs:
@@ -12,25 +13,27 @@ jobs:
         dataset: [mnist, emnist_bal]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install torch==2.7.0+cpu torchvision==0.22.0+cpu \
-              --index-url https://download.pytorch.org/whl/cpu
+          pip install torch==2.7.0 torchvision==0.22.0 \
+            --index-url https://download.pytorch.org/whl/cpu
 
       - name: One-epoch smoke train
         run: |
           python scripts/train.py \
             --dataset ${{ matrix.dataset }} \
-            --epochs 1 --batch-size 128
+            --epochs 1 \
+            --batch-size 128
 
-      - name: Eval accuracy
+      - name: Evaluate test accuracy
         run: |
           python ci_eval.py ${{ matrix.dataset }}
