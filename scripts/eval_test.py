@@ -31,7 +31,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.dataset == "mnist":
-        test_ds = MNIST(ROOT, train=False, transform=BASE_TRANSFORM)
+        test_ds = MNIST(ROOT, train=False, download=True, transform=BASE_TRANSFORM)
         test_dl = DataLoader(test_ds, batch_size=args.batch_size)
         num_classes = 10
     else:  # EMNIST-balanced

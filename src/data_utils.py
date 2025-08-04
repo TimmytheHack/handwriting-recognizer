@@ -43,6 +43,7 @@ def get_train_val_datasets(root: Path, val_size: int = 5_000, *, use_aug=False):
     full_train = MNIST(
         root=root,
         train=True,
+        download=True,
         transform=AUG_TRAIN_TRANSFORM if use_aug else BASE_TRANSFORM
     )
     assert len(full_train) == 60_000, "Unexpected MNIST train size"
