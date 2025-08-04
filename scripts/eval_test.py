@@ -11,7 +11,7 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 
-from src.data_utils import BASE_TRANSFORM, emnist_balanced_loaders
+from src.data_utils import BASE_TRANSFORM, emnist_balanced_loaders, emnist_balanced_loaders_split
 from src.models import LeNet5
 
 
@@ -31,14 +31,23 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.dataset == "mnist":
-        test_ds = MNIST(ROOT, train=False, download=True, transform=BASE_TRANSFORM)
+        test_ds = MNIST(
+            ROOT,
+            train=False,
+            download=True,          # ← force download in CI
+            transform=BASE_TRANSFORM
+        )
         test_dl = DataLoader(test_ds, batch_size=args.batch_size)
         num_classes = 10
     else:  # EMNIST-balanced
-        _, test_dl, class_names = emnist_balanced_loaders(
-            data_dir=ROOT, batch_size=args.batch_size
+        # if you’re using the split loader:
+        _, _, test_dl, class_names = emnist_balanced_loaders_split(
+            data_dir=ROOT,
+            batch_size=args.batch_size,
+            num_workers=4,
+            pin_memory=False
         )
-        num_classes = len(class_names)  # 47
+        num_classes = len(class_names)
 
     model = LeNet5(num_classes=num_classes)
     model.load_state_dict(torch.load(args.ckpt, map_location="cpu"))
