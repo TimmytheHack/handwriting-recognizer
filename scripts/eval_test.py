@@ -11,8 +11,7 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 
-from src.data_utils import BASE_TRANSFORM, emnist_balanced_loaders, emnist_balanced_loaders_split
-from src.models import LeNet5
+from src.data_utils import BASE_TRANSFORM, emnist_balanced_loaders_split
 
 
 ROOT = Path("data")
@@ -49,7 +48,13 @@ def main() -> None:
         )
         num_classes = len(class_names)
 
-    model = LeNet5(num_classes=num_classes)
+    from torchvision.models import resnet18
+    import torch.nn as nn
+    # same ResNet-18 architecture you used in training
+    model = resnet18(num_classes=num_classes, weights=None)
+    # adjust stem for 1-channel 28×28 inputs
+    model.conv1 = nn.Conv2d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
+    model.maxpool = nn.Identity()
     model.load_state_dict(torch.load(args.ckpt, map_location="cpu"))
     model.eval()
 
