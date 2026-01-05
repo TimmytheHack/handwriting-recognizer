@@ -6,3 +6,17 @@ data/*
 # …except the README that explains the folder
 !data/README.md
 .venv
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Checkpoints and logs
+*.pt
+*.pth
+*.ckpt
+runs/
+logs/
+
+# macOS
+.DS_Store
