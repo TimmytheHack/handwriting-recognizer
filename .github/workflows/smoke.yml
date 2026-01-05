@@ -1,4 +1,4 @@
-name: CI-smoke
+name: smoke
 
 on:
   push:
@@ -6,34 +6,50 @@ on:
   pull_request:
 
 jobs:
-  accuracy-check:
+  smoke-train:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         dataset: [mnist, emnist_bal]
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install torch==2.7.0 torchvision==0.22.0 \
+          pip install --upgrade --force-reinstall \
+            torch==2.7.0 torchvision==0.22.0 \
             --index-url https://download.pytorch.org/whl/cpu
 
       - name: One-epoch smoke train
         run: |
-          python scripts/train.py \
+          python train_mnist_simple.py \
             --dataset ${{ matrix.dataset }} \
             --epochs 1 \
-            --batch-size 128
+            --batch-size 128 \
+            | tee /tmp/smoke_output.txt
 
-      - name: Evaluate test accuracy
+      - name: Check minimum test accuracy
         run: |
-          python ci_eval.py ${{ matrix.dataset }}
+          python - <<'PY'
+          import re, sys
+          text = open("/tmp/smoke_output.txt", "r", encoding="utf-8").read()
+          match = re.search(r"Test accuracy: ([0-9.]+)%", text)
+          if not match:
+              print("Test accuracy not found in output")
+              sys.exit(1)
+          acc = float(match.group(1))
+          # Very low bar, just to catch regressions.
+          if acc < 20.0:
+              print(f"Test accuracy too low: {acc:.2f}%")
+              sys.exit(1)
+          print(f"Test accuracy OK: {acc:.2f}%")
+          PY
