@@ -5,3 +5,4 @@ data/*
 
 # …except the README that explains the folder
 !data/README.md
+.venv
