@@ -15,8 +15,11 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
+DatasetType = datasets.MNIST | datasets.EMNIST
+
 MEAN = 0.1307
 STD = 0.3081
+DEFAULT_EMNIST_URL = "https://biometrics.nist.gov/cs_links/EMNIST/gzip.zip"
 
 class SimpleCNN(nn.Module):
     """
@@ -110,18 +113,57 @@ class SimpleCNN(nn.Module):
         return self.classifier(x)
 
 
-def build_transforms(use_augmentation: bool) -> transforms.Compose:
+def emnist_fix_orientation() -> transforms.Lambda:
+    # EMNIST images are rotated and mirrored in the raw files.
+    return transforms.Lambda(lambda x: torch.flip(torch.rot90(x, 1, [1, 2]), [2]))
+
+
+def build_transforms(use_augmentation: bool, *, emnist_fix: bool) -> transforms.Compose:
+    pre = []
+    if use_augmentation:
+        pre.append(transforms.RandomAffine(degrees=10, translate=(0.1, 0.1), shear=(-8, 8)))
+
+    post = []
+    if emnist_fix:
+        post.append(emnist_fix_orientation())
+
     if not use_augmentation:
         return transforms.Compose([
+            *pre,
             transforms.ToTensor(),
+            *post,
             transforms.Normalize((MEAN,), (STD,)),
         ])
 
     return transforms.Compose([
-        transforms.RandomAffine(degrees=10, translate=(0.1, 0.1), shear=(-8, 8)),
+        *pre,
         transforms.ToTensor(),
+        *post,
         transforms.Normalize((MEAN,), (STD,)),
     ])
+
+
+def get_dataset(
+    name: str,
+    data_root: Path,
+    train: bool,
+    transform: transforms.Compose,
+    *,
+    emnist_url: str,
+) -> DatasetType:
+    if name == "mnist":
+        return datasets.MNIST(root=data_root, train=train, download=True, transform=transform)
+    if name == "emnist_bal":
+        # Override the default URL to avoid NIST redirects that break downloads.
+        datasets.EMNIST.url = emnist_url
+        return datasets.EMNIST(
+            root=data_root,
+            split="balanced",
+            train=train,
+            download=True,
+            transform=transform,
+        )
+    raise ValueError("dataset must be 'mnist' or 'emnist_bal'")
 
 
 def split_train_val_indices(total_len: int, val_split: float, seed: int) -> tuple[list[int], list[int]]:
@@ -144,37 +186,26 @@ def split_train_val_indices(total_len: int, val_split: float, seed: int) -> tupl
 
 
 def build_datasets(
+    dataset: str,
     data_root: Path,
     use_augmentation: bool,
     val_split: float,
     seed: int,
-) -> tuple[Subset, Subset, datasets.MNIST]:
-    train_tf = build_transforms(use_augmentation)
-    base_tf = build_transforms(False)
+    emnist_url: str,
+) -> tuple[Subset, Subset, DatasetType, int]:
+    emnist_fix = dataset.startswith("emnist")
+    train_tf = build_transforms(use_augmentation, emnist_fix=emnist_fix)
+    base_tf = build_transforms(False, emnist_fix=emnist_fix)
 
-    full_train_aug = datasets.MNIST(
-        root=data_root,
-        train=True,
-        download=True,
-        transform=train_tf,
-    )
-    full_train_base = datasets.MNIST(
-        root=data_root,
-        train=True,
-        download=True,
-        transform=base_tf,
-    )
-    test_ds = datasets.MNIST(
-        root=data_root,
-        train=False,
-        download=True,
-        transform=base_tf,
-    )
+    full_train_aug = get_dataset(dataset, data_root, True, train_tf, emnist_url=emnist_url)
+    full_train_base = get_dataset(dataset, data_root, True, base_tf, emnist_url=emnist_url)
+    test_ds = get_dataset(dataset, data_root, False, base_tf, emnist_url=emnist_url)
 
     train_idx, val_idx = split_train_val_indices(len(full_train_base), val_split, seed)
     train_ds = Subset(full_train_aug, train_idx)
     val_ds = Subset(full_train_base, val_idx)
-    return train_ds, val_ds, test_ds
+    num_classes = 10 if dataset == "mnist" else 47
+    return train_ds, val_ds, test_ds, num_classes
 
 
 def accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
@@ -240,11 +271,13 @@ def run_experiment(args: argparse.Namespace, *, sweep_mode: bool = False) -> Non
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
 
-    train_ds, val_ds, test_ds = build_datasets(
+    train_ds, val_ds, test_ds, num_classes = build_datasets(
+        dataset=args.dataset,
         data_root=args.data_root,
         use_augmentation=args.use_augmentation,
         val_split=args.val_split,
         seed=args.seed,
+        emnist_url=args.emnist_url,
     )
 
     train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
@@ -263,7 +296,7 @@ def run_experiment(args: argparse.Namespace, *, sweep_mode: bool = False) -> Non
         dropout=args.dropout,
         num_fc_layers=args.num_fc_layers,
         fc_hidden_dim=args.fc_hidden_dim,
-        num_classes=10,
+        num_classes=num_classes,
     ).to(device)
 
     if args.optimizer == "sgd":
@@ -406,13 +439,21 @@ def main() -> None:
     parser.add_argument("--overfit-gap-warn", type=float, default=0.05)
 
     # Data hyperparameters
+    parser.add_argument("--dataset", choices=["mnist", "emnist_bal"], default="mnist")
     parser.add_argument("--val-split", type=float, default=0.1,
                         help="Fraction of train set used for validation")
     parser.add_argument("--use-augmentation", action="store_true")
     parser.add_argument("--data-root", type=Path, default=Path("data"))
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--emnist-url", type=str, default=DEFAULT_EMNIST_URL)
 
     args = parser.parse_args()
+
+    if args.dataset != "mnist":
+        if args.run_name == "mnist_cnn":
+            args.run_name = f"{args.dataset}_cnn"
+        if args.checkpoint_name == "mnist_cnn":
+            args.checkpoint_name = args.run_name
 
     if args.sweep is not None:
         sweep_data = json.loads(args.sweep.read_text())
